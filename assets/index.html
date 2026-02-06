@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Model Configurator</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="logo.ico" type="image/x-icon">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🤖 模型配置与文档生成器</h1>
+            <div class="subtitle">轻松配置AI模型并生成图像分析报告</div>
+        </header>
+        
+        <!-- 配置页面 -->
+        <div id="config-page" class="page active">
+            <div class="card">
+                <h2>🔧 模型配置</h2>
+                <div class="form-group">
+                    <label for="api-key">API Key</label>
+                    <input type="password" id="api-key" placeholder="请输入API密钥" autocomplete="off">
+                    <div class="hint">* 请确保API密钥有效</div>
+                </div>
+                <div class="form-group">
+                    <label for="base-url">Base URL</label>
+                    <input type="url" id="base-url" placeholder="https://api.example.com/v1" autocomplete="off">
+                    <div class="hint">* 模型API的基准URL</div>
+                </div>
+                <div class="form-group">
+                    <label for="model">Model Name</label>
+                    <input type="text" id="model" placeholder="gpt-4o" autocomplete="off">
+                    <div class="hint">* 指定要使用的模型名称</div>
+                </div>
+                <button id="save-config" class="btn primary">💾 保存配置</button>
+            </div>
+        </div>
+        
+        <!-- 主功能页面 -->
+        <div id="main-page" class="page">
+            <div class="card">
+                <h2>✨ 功能面板</h2>
+                <div class="button-group">
+                    <button id="btn-config" class="btn secondary">
+                        <span class="icon">⚙️</span> 修改模型配置
+                    </button>
+                    <button id="btn-generate" class="btn primary">
+                        <span class="icon">🚀</span> 生成安全隐患整改单
+                    </button>
+                </div>
+            </div>
+            
+            <!-- 进度指示器 -->
+            <div id="progress-container" class="hidden">
+                <div class="progress-card">
+                    <div class="spinner"></div>
+                    <p id="progress-text">正在处理图像，请稍候...</p>
+                </div>
+            </div>
+            
+            <!-- 状态消息 -->
+            <div id="status-message" class="status hidden"></div>
+        </div>
+    </div>
+    
+    <script src="script.js"></script>
+</body>
+</html>
