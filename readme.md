@@ -94,6 +94,10 @@ Currently only Windows is supported, and the system must have Edge’s web‑ren
 
 ---
 
+## Video Demonstration
+https://www.bilibili.com/video/BV1yTPhzXEAL/?spm_id_from=333.1387.homepage.video_card.click&vd_source=be034c304f1e87379afd368904245827
+
+
 ## 🤝 Get in Touch
 
 If you’re interested in multimodal large‑model object detection, feel free to join our chat group:

@@ -69,6 +69,9 @@ python3 main_web.py
 
 2.优化UI
 
+## 视频演示
+https://www.bilibili.com/video/BV1yTPhzXEAL/?spm_id_from=333.1387.homepage.video_card.click&vd_source=be034c304f1e87379afd368904245827
+
 ## 联系我们
 如果对多模态大模型目标检测感兴趣，可扫码加入
 ![群聊](./image/群聊.jpg)
