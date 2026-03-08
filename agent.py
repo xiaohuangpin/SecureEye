@@ -1,12 +1,20 @@
-import base64,io,logging,json
+import base64,io,logging,json,asyncio
 from PIL import Image, ImageDraw, ImageFont
-from openai import OpenAI
+from openai import AsyncOpenAI,OpenAI
 
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
+
+def test_api(api_key:str,base_url:str) -> bool:
+    try:
+        client = OpenAI(api_key=api_key,base_url=base_url)
+        models:list[str] = client.models.list()
+        return True
+    except:
+        return False
 
 class MultClient:
     def __init__(
@@ -18,7 +26,7 @@ class MultClient:
         font_path: str = "simhei.ttf",
         font_size: int = 14
     ):
-        self.client = OpenAI(api_key=api_key, base_url=base_url)
+        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model:str = model_name
         self.font = self._load_font(font_path, font_size)
         self.system_prompt:str = f"""
@@ -49,7 +57,7 @@ class MultClient:
 
     @staticmethod
     def _load_font(font_path: str, font_size: int) -> ImageFont.FreeTypeFont:
-        
+
         try:
             return ImageFont.truetype(font_path, font_size)
         except Exception as e:
@@ -58,7 +66,7 @@ class MultClient:
 
     @staticmethod
     def _encode_image_data(image_data: str|Image.Image) -> str:
-       
+
         if isinstance(image_data, str):
             with open(image_data, "rb") as f:
                 return base64.b64encode(f.read()).decode("utf-8")
@@ -69,10 +77,10 @@ class MultClient:
         else:
             raise TypeError("image_data 必须是图像路径 (str) 或 PIL Image 对象")
 
-    def secure_check(self, image_data: str | Image.Image) -> list[dict[str, list[int]|str]]:
+    async def secure_check(self, image_data: str | Image.Image) -> list[dict[str, list[int]|str]]:
         try:
             image_base64 = self._encode_image_data(image_data)
-            response = self.client.chat.completions.create(
+            response = await self.client.chat.completions.create(
                 model = self.model,
                 messages = [
                     {"role": "system", "content": self.system_prompt},
@@ -90,8 +98,8 @@ class MultClient:
                 response_format={"type": "json_object"}
             )
             content:str = response.choices[0].message.content
-            
             logging.info(f"模型输出：{content}")
+            #time.sleep(1.5)
             return json.loads(content)
         except Exception as e:
             logging.error(f"模型推理失败: {e}")
@@ -114,7 +122,7 @@ class MultClient:
         boxes: list[list[int]],
         labels: list[str] | None = None,
         renormalize: bool = False,
-        return_b64: bool = False,
+        return_b64: bool = True,
     ) -> Image.Image:
         """在图像上绘制边界框和标签"""
         img = image.copy().convert("RGB")
@@ -140,34 +148,57 @@ class MultClient:
         return img
     
 
-    def infer(self, image_path: str, is_label: bool = False) -> dict[str, Image.Image|str]:
+    async def infer(self, image_path: str, is_label: bool = False) -> dict[str, Image.Image|str]:
         image = Image.open(image_path).convert("RGB")
-        results = self.secure_check(image)
+        results = await self.secure_check(image)
 
-        boxes = [r["bbox_2d"] for r in results]
-        labels = [r["label"] for r in results]
+        boxes,labels = [r["bbox_2d"] for r in results],[r["label"] for r in results]
+        #labels = [r["label"] for r in results]
 
-        output_image = self.visualize_boxes(image, boxes, labels, renormalize=True) if is_label else image
+        output_image = self.visualize_boxes(image, boxes, labels, renormalize=True) if is_label else self._encode_image_data(image)
         label_text = "\n".join(f"{i}.{lbl}" for i, lbl in enumerate(labels, start=1))
 
         return {"image": output_image, "label": label_text}
 
-    def batch_infer(self, img_paths: list[str], is_label: bool = False) -> list[dict[str, Image.Image | str]]:
-        return [self.infer(path, is_label) for path in img_paths]
+    async def batch_infer(self, img_paths: list[str], is_label: bool = False) -> list[dict[str, Image.Image | str]]:
+
+        #return [self.infer(path, is_label) for path in img_paths]
+        tasks = [self.infer(path, is_label) for path in img_paths]
+        return await asyncio.gather(*tasks)
+        #return results
+
+async def secure_cv(
+            api_key:str,
+            base_url:str,
+            model_name:str,
+            example:str,
+            ima_path:list[str],
+            is_label:bool=False) -> list[dict[str,str]]:
+    clinet = MultClient(
+            api_key,
+            base_url,
+            model_name,
+            example,
+        )
+    results:list[dict[str,str]] = await clinet.batch_infer(ima_path, is_label)
+    logging.info(f"处理了 {len(results)} 张图片")
+    return results
 
 
 if __name__ == "__main__":
-    api_key="51717266bdda4a83be510e425fab2767.j0m9tLNUzONDBl9H"
+    api_key="40d63b64ed374134a0b3b24c6e3963b0.jZy5E9Q37TUXmSXX"
     base_url="https://open.bigmodel.cn/api/paas/v4/"
-    model_name = "glm-4.6v-flash"
+    model_name = "GLM-4V-Flash"
     example = ["未固定的高空作业平台","裸露的带电电缆"]
     image_path = "image/9.jpg"
     ima_list = ['image/9.jpg','image/7.jpg']
-    api = MultClient(
-        api_key,
-        base_url,
-        model_name,
-        example,
-    )
+    #asyncio.run(secure_cv(api_key,base_url,model_name,example,ima_list))
+    a:bool = test_api(api_key,base_url)
+    print(a)
+
+
+
+    """
     a = api.batch_infer(ima_list,True)
     print(a)
+    """

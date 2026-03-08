@@ -2,16 +2,13 @@ from docx import Document
 from docx.shared import Inches
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-import tempfile
-import os,logging
+import os,logging,base64,io
 
-
-def export_to_word(data_list:list) -> str:
+def export_to_word(data_list:list[dict[str,str]]) -> str:
     
     doc = Document()
     
-    
-    title = doc.add_heading('图片标注表格', level=1)
+    title = doc.add_heading('安全隐患整改单', level=1)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
     
     
@@ -45,25 +42,27 @@ def export_to_word(data_list:list) -> str:
         
         
         img_cell = row_cells[0]
-        img = item['image']
+        img:str = item['image']
+
+        if img.startswith('data:image'):
+            img = img.split(',')[1]
         
+        image_bytes:bytes = base64.b64decode(img)
+
+        image_stream:io.BytesIO = io.BytesIO(image_bytes) #: BinaryIO
         
+        """
         with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as tmpfile:
             img.save(tmpfile, format='PNG')
             tmp_path = tmpfile.name
-        
-        try:
+        """
+
             
-            paragraph = img_cell.paragraphs[0] if img_cell.paragraphs else img_cell.add_paragraph()
-            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            run = paragraph.add_run()
+        paragraph = img_cell.paragraphs[0] if img_cell.paragraphs else img_cell.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = paragraph.add_run()
            
-            run.add_picture(tmp_path, width=Inches(1.2))
-        finally:
-            
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
-        
+        run.add_picture(image_stream, width=Inches(1.2))
         
         label_cell = row_cells[1]
         label_cell.text = item['label']
@@ -88,33 +87,25 @@ def export_to_word(data_list:list) -> str:
     logging.info(f"{output_path}文件保存成功")
     return output_path
 
-"""
-def open_file_with_default_app(file_path: str) -> bool:
-   
-    try:
-        
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"文件不存在：{file_path}")
-        
-        os.startfile(file_path)
-        print(f"成功打开文件：{file_path}，进程ID：{os.getpid()}")
-        return True
-    except Exception as e:
-        print(f"打开文件失败：{str(e)}，进程ID：{os.getpid()}")
-        return None
-"""
-
 if __name__ == "__main__":
-    from agent import MultClient
-    api_key="51717266bdda4a83be510e425fab2767.j0m9tLNUzONDBl9H"
+    from agent import secure_cv
+    import asyncio
+    api_key="40d63b64ed374134a0b3b24c6e3963b0.jZy5E9Q37TUXmSXX"
     base_url="https://open.bigmodel.cn/api/paas/v4/"
-    model_name = "glm-4.6v-flash"
+    model_name = "GLM-4V-Flash"
     example = ["未固定的高空作业平台","裸露的带电电缆"]
     image_path = "image/14.jpg"
     ima_list = ['image/6.jpg','image/6.jpg']
-    api = MultClient(api_key,base_url,model_name,example)
-    example_data = api.batch_infer(ima_list,True)
-    export_to_word(example_data, "image_table.docx")
+    
+    async def test() -> None:
+        example_data = await secure_cv(api_key,base_url,model_name,example,ima_list)
+        export_to_word(example_data)
+
+    asyncio.run(test())
+
+    #api = MultClient(api_key,base_url,model_name,example)
+    #example_data = api.batch_infer(ima_list,True)
+    #export_to_word(example_data)
     
     """
     ####启动文件

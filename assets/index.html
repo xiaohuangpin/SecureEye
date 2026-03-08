@@ -33,6 +33,33 @@
                     <input type="text" id="model" placeholder="gpt-4o" autocomplete="off">
                     <div class="hint">* 指定要使用的模型名称</div>
                 </div>
+                <div class="form-group">
+                    <label for="is_label_checkbox">是否绘制边界框</label>
+                    <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                        <input 
+                            type="checkbox" 
+                            id="is_label_checkbox" 
+                            checked 
+                            onchange="document.getElementById('is_label').value = this.checked ? true : false"
+                            style="width: auto; margin: 0;"
+                        >
+                        <input 
+                            type="hidden" 
+                            id="is_label" 
+                            value= true
+                        >
+                        <script>
+                            document.addEventListener('DOMContentLoaded', function() {
+                                const hiddenInput = document.getElementById('is_label');
+                                const checkbox = document.getElementById('is_label_checkbox');
+                                if (hiddenInput && checkbox) {
+                                    checkbox.checked = hiddenInput.value.trim().toLowerCase() === 'true';
+                                }
+                            });
+                        </script>
+                    </div>
+                    <div class="hint">* 勾选后将在输出中绘制目标检测边界框</div>
+                </div>
                 <button id="save-config" class="btn primary">💾 保存配置</button>
             </div>
         </div>

@@ -28,7 +28,9 @@ async function initializeApp() {
             document.getElementById('api-key').value = response.config.api_key || '';
             document.getElementById('base-url').value = response.config.base_url || '';
             document.getElementById('model').value = response.config.model || '';
-            
+            //var isLabel = document.getElementById('is_label').value === 'true';
+            //isLabel = response.config.is_label || '';
+            document.getElementById('is_label').value = response.config.is_label || false;
             showMainPage();
         } else {
             console.log('[App] 配置无效，显示配置页面');
@@ -46,6 +48,7 @@ async function saveConfig() {
     const apiKey = document.getElementById('api-key').value.trim();
     const baseUrl = document.getElementById('base-url').value.trim();
     const model = document.getElementById('model').value.trim();
+    const isLabel = document.getElementById("is_label").value;
     
     // 验证输入
     if (!apiKey || !baseUrl || !model) {
@@ -54,7 +57,7 @@ async function saveConfig() {
     }
 
     try {
-        const response = await pywebview.api.save_config(apiKey, baseUrl, model);
+        const response = await pywebview.api.save_config(apiKey, baseUrl, model,isLabel);
         
         if (response.success) {
             showSuccess(response.message);
@@ -64,7 +67,7 @@ async function saveConfig() {
         }
     } catch (error) {
         console.error('保存配置错误:', error);
-        showError('保存配置时发生错误');
+        showError('无效api_key或者base_url');
     }
 }
 
@@ -84,12 +87,13 @@ async function startGeneration() {
             return;
         }
         
+        const isLabel = document.getElementById("is_label").value === 'true'
         
         document.getElementById('progress-container').classList.remove('hidden');
         document.getElementById('status-message').classList.add('hidden');
         
        
-        const genResponse = await pywebview.api.start_generation(fileResponse.paths);
+        const genResponse = await pywebview.api.start_generation(fileResponse.paths,isLabel);
         
         if (!genResponse.success) {
             hideProgress();

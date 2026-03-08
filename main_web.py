@@ -1,9 +1,8 @@
-import webview,json,threading,multiprocessing,os,sys
+import webview,json,multiprocessing,os,sys,subprocess,asyncio
 from pathlib import Path
-from agent import MultClient
+from agent import secure_cv,test_api
 from export import export_to_word
-import subprocess
-import multiprocessing
+
 #nuitka --standalone --enable-plugin=anti-bloat --include-package-data=docx --include-data-dir=assets=assets --output-dir=dist --windows-icon-from-ico=logo.ico --windows-disable-console --output-dir=dist main_web.py
 #--onefile
 #pyinstaller --windowed --name secure --add-data "assets;assets" main_web.py
@@ -58,7 +57,7 @@ class API:
         if not self.config:
             return {"valid": False}
     
-        required = ["api_key", "base_url", "model"]
+        required = ["api_key", "base_url", "model","is_label"]
 
         valid = all(
             field in self.config and 
@@ -72,20 +71,25 @@ class API:
             "config": self.config if valid else None
         }
     
-    def save_config(self, api_key, base_url, model):
+    def save_config(self, api_key:str, base_url:str, model:str,is_label:bool):
 
-        try:
-            config = {
-                "api_key": api_key.strip(),
-                "base_url": base_url.strip(),
-                "model": model.strip()
-            }
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(config, f, ensure_ascii=False, indent=4)
-            self.config = config
-            return {"success": True, "message": "配置保存成功！"}
-        except Exception as e:
-            return {"success": False, "message": f"配置保存失败: {str(e)}"}
+        if test_api(api_key,base_url):
+            try:
+
+                config = {
+                    "api_key": api_key.strip(),
+                    "base_url": base_url.strip(),
+                    "model": model.strip(),
+                    "is_label" : is_label,
+                }
+                with open(self.config_path, "w", encoding="utf-8") as f:
+                    json.dump(config, f, ensure_ascii=False, indent=4)
+                self.config = config
+                return {"success": True, "message": "配置保存成功！"}
+            except Exception as e:
+                return {"success": False, "message": f"配置保存失败: {str(e)}"}
+        else:
+            return {"success": False, "message": "无效api_key或者base_url"}
         
     def select_images(self):
 
@@ -105,7 +109,7 @@ class API:
             return {"success": False, "message": f"文件选择失败: {str(e)}"}
         
     #该函数异步执行，根本不会停止
-    def start_generation(self,img_list):
+    def start_generation(self,img_list:list[str],is_label:bool=False) -> None:
 
         if not self.config:
             return {"success": False, "message": "配置无效，请先配置模型参数"}
@@ -115,6 +119,7 @@ class API:
         if not all(field in self.config for field in required):
             return {"success": False, "message": "配置不完整，请检查配置"}
         
+        """
         thread = threading.Thread(
             target=self._run_export_task,
             args=(img_list,),
@@ -122,23 +127,30 @@ class API:
         )
 
         thread.start()
+        """
+        asyncio.run(self._run_export_task(img_list, is_label))
 
         return {"success": True, "message": "任务已启动"}
     
 
-    def _run_export_task(self,img_list):
+    async def _run_export_task(self,img_list:list[str],is_label:bool=False) -> None:
 
         try:
             self.window.evaluate_js("window.taskStarted()")
 
             example = ["未固定的高空作业平台", "裸露的带电电缆"]
+            """
             client = MultClient(
                 self.config["api_key"],
                 self.config["base_url"],
                 self.config["model"],
                 example
             )
-            data = client.batch_infer(img_list, True)
+            """
+            
+            #data = client.batch_infer(img_list, True)
+            data = await secure_cv(self.config["api_key"],self.config["base_url"],self.config["model"],example,img_list,is_label)
+
             #output_path = Path(__file__).parent / "image_table.docx"
             output_path = export_to_word(data)
             #DOCX_FILE_PATH = "image_table.docx"
@@ -192,7 +204,7 @@ def main():
 
     api.set_window(window)
 
-    webview.start(debug=False)
+    webview.start(debug=True)
 
 if __name__ == "__main__":
     main()

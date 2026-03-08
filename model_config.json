@@ -1,3 +1,6 @@
 {
-
+    "api_key": "40d63b64ed374134a0b3b24c6e3963b0.jZy5E9Q37TUXmSXX",
+    "base_url": "https://open.bigmodel.cn/api/paas/v4/",
+    "model": "GLM-4V-Flash",
+    "is_label": "false"
 }
