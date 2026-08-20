@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>安全隐患排查</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" href="logo.ico" type="image/x-icon">
+</head>
+
+<body>
+    <div class="container">
+        <!-- 1. 首页 -->
+        <section id="page-home" class="page active">
+            <div class="hero">
+                <div class="hero-logo">🦺</div>
+                <h1>安全隐患智能排查</h1>
+                <p>基于多模态大模型的工地违规作业识别</p>
+            </div>
+            <div class="home-actions">
+                <button class="btn secondary" data-go="config">⚙️ 模型配置</button>
+                <button class="btn primary" data-act="detect">🔍 安全隐患检测</button>
+            </div>
+        </section>
+
+        <!-- 2. 模型配置 -->
+        <section id="page-config" class="page">
+            <div class="bar">
+                <button class="btn-ghost" data-go="home">← 返回</button>
+                <h2>模型配置</h2>
+                <span class="bar-pad"></span>
+            </div>
+            <div class="body">
+                <div class="field">
+                    <label for="api-key">API Key</label>
+                    <input type="password" id="api-key" placeholder="请输入 API 密钥" autocomplete="off">
+                </div>
+                <div class="field">
+                    <label for="base-url">Base URL</label>
+                    <input type="url" id="base-url" placeholder="https://api.example.com/v1">
+                </div>
+                <div class="field">
+                    <label for="model">Model</label>
+                    <input type="text" id="model" placeholder="qwen-vl-max">
+                </div>
+                <label class="switch">
+                    <input type="checkbox" id="is-label" checked>
+                    <span>在图片中绘制检测框</span>
+                </label>
+            </div>
+            <div class="foot">
+                <button class="btn primary" data-act="save">💾 保存配置</button>
+            </div>
+        </section>
+
+        <!-- 3. 检测结果 -->
+        <section id="page-result" class="page">
+            <div class="bar">
+                <button class="btn-ghost" data-go="home">← 返回</button>
+                <h2>安全隐患表</h2>
+                <span class="count" id="result-count"></span>
+            </div>
+            <div class="body">
+                <table class="grid">
+                    <thead>
+                        <tr>
+                            <th style="width:44%">隐患图片</th>
+                            <th>隐患描述</th>
+                        </tr>
+                    </thead>
+                    <tbody id="result-body"></tbody>
+                </table>
+            </div>
+            <div class="foot row">
+                <button class="btn secondary" data-act="export-excel">📊 导出 Excel</button>
+                <button class="btn secondary" data-act="export-word">📄 导出 Word</button>
+            </div>
+        </section>
+    </div>
+
+    <!-- 遮罩：加载中 -->
+    <div id="loading" class="mask hidden">
+        <div class="spinner"></div>
+        <p id="loading-text">正在检测，请稍候…</p>
+    </div>
+
+    <!-- 全局提示 -->
+    <div id="toast" class="toast"></div>
+
+    <!-- 图片预览 -->
+    <div id="viewer" class="mask hidden"><img id="viewer-img" alt="预览"></div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
