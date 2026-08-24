@@ -302,7 +302,8 @@ def main() -> None:
         js_api=api,
         width=600,
         height=450,
-        resizable=False,
+        resizable=True,
+        min_size=(480, 360),
         frameless=False,
         background_color="#f5f7fa",
     )
