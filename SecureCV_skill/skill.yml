@@ -1,0 +1,113 @@
+name: securecv
+version: 0.1.0
+author: SecureEye
+description: >-
+  基于多模态大模型的施工现场安全隐患检测技能。输入单张或多张工地图片，
+  识别工人的不安全行为与违章作业，输出边界框坐标、中文隐患描述，
+  并可在原图上绘制红色标注框与中文标签。
+license: MIT
+tags:
+  - computer-vision
+  - safety-inspection
+  - multimodal-llm
+  - go
+runtime:
+  language: go
+  min_version: "1.25.0"
+  module: securecv
+  build: cd src && go build -o ../bin/securecv ./cmd/securecv
+  binary: bin/securecv
+  library_package: securecv
+
+# 模型参数一律通过环境变量注入，不在代码中硬编码密钥
+env:
+  required:
+    - name: api_key
+      description: 模型服务密钥，兼容大写 API_KEY / OPENAI_API_KEY
+      example: sk-xxxxxxxxxxxxxxxx
+    - name: base_url
+      description: OpenAI 兼容端点地址，需以 / 结尾时与服务端保持一致
+      example: https://open.bigmodel.cn/api/paas/v4/
+    - name: model
+      description: 多模态视觉模型名称
+      example: glm-4.6v-flash
+  optional:
+    - name: SECURECV_FONT_PATH
+      description: 中文标注字体路径，留空时自动探测 assets/simhei.ttf
+      default: assets/simhei.ttf
+    - name: SECURECV_FONT_SIZE
+      description: 标注字号
+      default: "14"
+    - name: SECURECV_MAX_SIZE
+      description: 上传图片的最大边长，超出等比缩小
+      default: "2048"
+    - name: SECURECV_CONCURRENCY
+      description: 批量推理并发度
+      default: "4"
+    - name: SECURECV_TIMEOUT
+      description: 单次模型请求超时，支持 90s / 2m 等写法
+      default: 120s
+    - name: SECURECV_HTTP_TIMEOUT
+      description: 下载网络图片的超时
+      default: 10s
+    - name: SECURECV_DEBUG
+      description: 开启调试日志（1/true/yes/on），会打印模型原始输出
+      default: "false"
+
+inputs:
+  - name: images
+    type: array<string>
+    required: true
+    description: 图片路径列表，支持本地路径与 http(s) 图片链接
+    example: ["image/159.jpg", "https://example.com/site.jpg"]
+  - name: is_label
+    type: boolean
+    required: false
+    default: true
+    description: 是否在输出图上绘制标注框与标签；为 false 时直接返回原图
+  - name: concurrency
+    type: integer
+    required: false
+    default: 4
+    description: 批量推理并发度，覆盖环境变量 SECURECV_CONCURRENCY
+  - name: save
+    type: string
+    required: false
+    description: 可选，将标注图保存到该目录
+  - name: no_image
+    type: boolean
+    required: false
+    default: false
+    description: 输出 JSON 中不包含 base64 图片，仅保留标签与坐标
+
+outputs:
+  type: array<object>
+  description: 与输入顺序一致的结果数组，单图失败时该条目的 error 字段非空
+  schema:
+    image:
+      type: string
+      description: 结果图的 data URI（data:image/jpeg;base64,...），no_image 时为空
+    label:
+      type: string
+      description: 拼接后的隐患描述文本，形如 "1.工人未佩戴安全带\n2...."
+    detections:
+      type: array<object>
+      description: 检测条目，空数组表示未发现隐患
+      item:
+        bbox_2d:
+          type: array<integer>
+          description: 归一化坐标 [x1, y1, x2, y2]，取值 0~1000
+        label:
+          type: string
+          description: 中文隐患描述
+    error:
+      type: string
+      description: 单图处理失败原因，成功时省略
+
+usage:
+  cli: >-
+    set api_key=xxx && set base_url=https://... && set model=glm-4.6v-flash &&
+    securecv -pretty image/159.jpg
+  library: >-
+    client, _ := securecv.NewClient(cfg);
+    results := client.BatchInferPaths(ctx, paths, true)

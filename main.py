@@ -90,10 +90,25 @@ def create_ui():
         )
         
         gr.Examples(
-            examples=[["image/8.jpg"], ["image/9.jpg"]], # 替换为实际示例路径
+            examples=[["image/8.jpg"], ["image/9.jpg"]],
             inputs=input_image,
             label="点击加载示例"
         )
+
+        # ================= 案例演示区 =================
+        demos = [
+            ("原始图片", "image/103.jpg", "检测结果", "image/show1.png"),
+            ("原始图片", "image/159.jpg", "检测结果", "image/show2.png"),
+            ("原始图片", "image/违规作业场景.png", "检测结果", "image/show3.png"),
+        ]
+        with gr.Row():
+            gr.Markdown("### 📋 案例演示")
+        with gr.Row():
+            for label_before, src_before, label_after, src_after in demos:
+                with gr.Column(scale=1):
+                    gr.Image(label=label_before, value=src_before, interactive=False)
+                with gr.Column(scale=1):
+                    gr.Image(label=label_after, value=src_after, interactive=False)
 
     return demo
 

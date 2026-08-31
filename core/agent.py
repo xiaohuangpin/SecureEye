@@ -1,47 +1,12 @@
 import base64,io,logging,json,asyncio,re
-from typing import List, Tuple
+from typing import List
 from PIL import Image, ImageDraw, ImageFont
 from openai import AsyncOpenAI
-from pydantic import BaseModel, Field, TypeAdapter
+from pydantic import TypeAdapter
+from core.models import DetectionResponse, DetectionResult, DetectionItem
+from core.utils import _download_image,_repair_bbox_commas,_reverse_normalize_box
 
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-
-class DetectionItem(BaseModel):
-    
-    bbox_2d: Tuple[int, int, int, int] = Field(
-        description="边界框坐标 [x1, y1, x2, y2]，整数像素坐标"
-    )
-    label: str = Field(
-        description="违规标签，例如：工人临边作业未正确佩戴或挂扣安全带"
-    )
-
-    def normalize(self) -> "DetectionItem":
-        """裁剪到 [0, NORM_MAX] 并修正 x1>x2 / y1>y2 的非法顺序"""
-        x1, y1, x2, y2 = (max(0, min(1000, int(round(v)))) for v in self.bbox_2d)
-        if x1 > x2:
-            x1, x2 = x2, x1
-        if y1 > y2:
-            y1, y2 = y2, y1
-        return DetectionItem(bbox_2d=(x1, y1, x2, y2), label=self.label)
-
-
-class DetectionResult(BaseModel):
-    """模型整体输出：检测列表 + 校验统计"""
-    detections: list[DetectionItem] = Field(default_factory=list)
-    dropped: int = 0  
-
-
-class DetectionResponse(BaseModel):
-    """beta parse 结构化输出根对象（SDK 要求 response_format 为单一对象）"""
-    detections: list[DetectionItem] = Field(
-        default_factory=list,
-        description="检测到的所有工人不安全行为条目",
-    )
-
+logger = logging.getLogger(__name__)
 
 class MultClient:
     def __init__(
@@ -131,16 +96,20 @@ class MultClient:
         try:
             return ImageFont.truetype(font_path, font_size)
         except Exception as e:
-            logging.warning(f"字体加载失败: {e}，使用默认字体")
+            logger.warning(f"字体加载失败: {e}，使用默认字体")
             return ImageFont.load_default()
 
-    @staticmethod
-    def _encode_image_data(image_data: str | Image.Image) -> str:
+
+    async def _encode_image_data(self, image_data: str | Image.Image) -> str:
+        is_url:bool = isinstance(image_data, str) and image_data.startswith(("http://", "https://"))
         if isinstance(image_data, str):
-            img = Image.open(image_data)
+            if is_url:
+                img = Image.open(io.BytesIO(await _download_image(image_data)))
+            else:
+                img = Image.open(image_data)
             w, h = img.size
             # 快速路径：无需缩放时直接读取原始文件（保留原格式，性能最优）
-            if w <= 2048 and h <= 2048:
+            if w <= 2048 and h <= 2048 and not is_url:
                 img.close()
                 with open(image_data, "rb") as f:
                     return base64.b64encode(f.read()).decode("utf-8")
@@ -161,7 +130,7 @@ class MultClient:
 
     async def secure_check(self, image_data: str | Image.Image) -> list[dict]:
         try:
-            image_base64 = self._encode_image_data(image_data)
+            image_base64 = await self._encode_image_data(image_data)
             response = await self.client.chat.completions.create(
                 model = self.model,
                 messages = [
@@ -180,17 +149,17 @@ class MultClient:
                 response_format={"type": "json_object"}
             )
             content:str = response.choices[0].message.content
-            logging.info(f"模型输出：{content}")
+            logger.info(f"模型输出：{content}")
             #time.sleep(1.5)
             result: DetectionResult = self._parse_content(content)
             return [d.model_dump() for d in result.detections]
         except Exception as e:
-            logging.error(f"模型推理失败: {e}")
+            logger.error(f"模型推理失败: {e}")
             raise
 
     async def secure_check_parse(self, image_data: str | Image.Image) -> list[dict]:
         try:
-            image_base64 = self._encode_image_data(image_data)
+            image_base64 = await self._encode_image_data(image_data)
             response = await self.client.beta.chat.completions.parse(
                 model=self.model,
                 messages=[
@@ -210,21 +179,12 @@ class MultClient:
             )
             parsed: DetectionResponse = response.choices[0].message.parsed
             if parsed is None:
-                logging.warning("结构化解析返回为空（可能触发了拒绝/安全策略）")
+                logger.warning("结构化解析返回为空（可能触发了拒绝/安全策略）")
                 return []
             return [d.normalize().model_dump() for d in parsed.detections]
         except Exception as e:
-            logging.error(f"结构化模型推理失败: {e}")
+            logger.error(f"结构化模型推理失败: {e}")
             raise
-
-    @staticmethod
-    def _repair_bbox_commas(text: str) -> str:
-        """修复 bbox_2d 数组中数字间缺失的逗号：如 [470 345 536 449] -> [470, 345, 536, 449]"""
-        return re.sub(
-            r'"bbox_2d"\s*:\s*\[[\d.\-]+(?:\s*[,\s]+\s*[\d.\-]+)+\]',
-            lambda m: re.sub(r'(?<=[\d.\-])\s+(?=[\d.\-])', ', ', m.group(0)),
-            text,
-        )
 
     @staticmethod
     def _extract_json_array(text: str) -> list:
@@ -233,7 +193,7 @@ class MultClient:
         text = text.strip()
         if not text:
             return []
-        text = MultClient._repair_bbox_commas(text)
+        text = _repair_bbox_commas(text)
 
         try:
             obj = json.loads(text)
@@ -272,7 +232,7 @@ class MultClient:
             except json.JSONDecodeError:
                 pass
 
-        logging.warning("无法从模型输出中解析出 JSON 数组")
+        logger.warning("无法从模型输出中解析出 JSON 数组")
         return []
 
     @classmethod
@@ -288,12 +248,12 @@ class MultClient:
                 detections=[it.normalize() for it in items], dropped=0
             )
         except Exception as e:
-            logging.warning(f"第一轮 Pydantic 校验失败，启用正则兜底: {e}")
+            logger.warning(f"第一轮 Pydantic 校验失败，启用正则兜底: {e}")
 
         # 兜底：用正则从脏文本中逐条抽取 {bbox_2d:[..], label:".."}
         dropped, detections = cls._regex_fallback(content)
         if dropped:
-            logging.warning(f"正则兜底共丢弃 {dropped} 条非法检测条目")
+            logger.warning(f"正则兜底共丢弃 {dropped} 条非法检测条目")
         return DetectionResult(detections=detections, dropped=dropped)
 
     @staticmethod
@@ -325,16 +285,6 @@ class MultClient:
                 dropped += 1
         return dropped, detections
 
-    @staticmethod
-    def _reverse_normalize_box(box: list[int], img_width: int, img_height: int) -> list[int]:
-        """将 [0,999] 归一化坐标转换为像素坐标"""
-        x1, y1, x2, y2 = [max(0, min(1000.0, v)) for v in box]
-        return [
-            int((x1 / 1000.0) * img_width),
-            int((y1 / 1000.0) * img_height),
-            int((x2 / 1000.0) * img_width),
-            int((y2 / 1000.0) * img_height)
-        ]
 
     def visualize_boxes(
         self,
@@ -352,7 +302,7 @@ class MultClient:
 
         for box, label in zip(boxes, labels):
             if renormalize:
-                box = self._reverse_normalize_box(box, img.width, img.height)
+                box = _reverse_normalize_box(box, img.width, img.height)
             draw.rectangle([(box[0], box[1]), (box[2], box[3])], outline=(255, 0, 0, 255), width=2, fill=(255, 0, 0, 30))
             if label:
                 text_bbox:tuple[float,float,float,float] = draw.textbbox((0, 0), label, font=self.font)
@@ -372,7 +322,7 @@ class MultClient:
         try:
             return await self.secure_check_parse(image)
         except Exception as e:
-            logging.warning(f"secure_check_parse 失败，降级 secure_check: {e}")
+            logger.warning(f"secure_check_parse 失败，降级 secure_check: {e}")
             return await self.secure_check(image)
 
     async def infer(self, image_path: str | Image.Image, is_label: bool) -> dict[str, Image.Image | str]:
@@ -380,7 +330,7 @@ class MultClient:
         results = await self._detect(image)
         boxes, labels = [r["bbox_2d"] for r in results], [r["label"] for r in results]
 
-        output_image = self.visualize_boxes(image, boxes, labels, renormalize=True) if is_label else self._encode_image_data(image)
+        output_image = self.visualize_boxes(image, boxes, labels, renormalize=True) if is_label else await self._encode_image_data(image)
         label_text = "\n".join(f"{i}.{lbl}" for i, lbl in enumerate(labels, start=1))
 
         return {"image": output_image, "label": label_text}
@@ -406,7 +356,7 @@ if __name__ == "__main__":
     results: list[dict] = asyncio.run(client.batch_infer(ima_list, True))
     for r in results:
         print(r["label"])
-    logging.info(f"处理了 {len(results)} 张图片")
+    logger.info(f"处理了 {len(results)} 张图片")
 
     # 测试 secure_check_parse：结构化输出，成功则打印数据类 JSON
     #async def test_parse(img_path: str):
