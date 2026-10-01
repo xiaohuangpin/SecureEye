@@ -16,9 +16,9 @@ import (
 
 // 真实测试配置与测试图，go test -short 时跳过联网用例。
 const (
-	testAPIKey  = "sk-live-FwvUaHKfDD_immjRYXa719dzIy9fxmNHzh5pq1Lmzf4"
-	testBaseURL = "https://api.modelbest.cn/v1"
-	testModel   = "MiniCPM-V-4.5"
+	testAPIKey  = "ms-8dada6b5-43a0-40ae-adeb-b29649d4d926"
+	testBaseURL = "https://api-inference.modelscope.cn/v1"
+	testModel   = "Qwen/Qwen3.5-122B-A10B"
 	testImage   = `C:\Users\admin\Desktop\SecureEye\image\159.jpg`
 )
 
@@ -149,8 +149,12 @@ func TestRunInfer(t *testing.T) {
 	if res.Error != "" {
 		t.Fatalf("单图处理出错: %s", res.Error)
 	}
-	if !strings.HasPrefix(res.Image, "data:image/jpeg;base64,") {
-		t.Fatalf("标注图缺失或格式错误: %.64q", res.Image)
+	// JSON 输出不应包含图片字段。
+	if res.Image != "" {
+		t.Fatalf("JSON 输出不应含图片字段: %.64q", res.Image)
+	}
+	if len(res.Detections) == 0 && strings.TrimSpace(res.Label) == "" {
+		t.Fatalf("期望检测到隐患: label=%q detections=%v", res.Label, res.Detections)
 	}
 	t.Logf("检测结果 %d 条: %s", len(res.Detections), res.Label)
 }
@@ -159,7 +163,7 @@ func TestRunInferWithFlags(t *testing.T) {
 	requireOnline(t)
 	saveDir := prepareOutDir(t)
 
-	out, err := runCLI(t, "-no-image", "-pretty", "-save", saveDir, "-concurrency", "2", requireImage(t))
+	out, err := runCLI(t, "-pretty", "-save", saveDir, "-concurrency", "2", requireImage(t))
 	if err != nil {
 		t.Fatalf("推理失败: %v", err)
 	}
@@ -167,11 +171,16 @@ func TestRunInferWithFlags(t *testing.T) {
 	if results[0].Error != "" {
 		t.Fatalf("单图处理出错: %s", results[0].Error)
 	}
-	if results[0].Image != "" {
-		t.Fatalf("-no-image 应清空图片字段: %.64q", results[0].Image)
+	// 即便未 -save，InferResult.Image 在内存中仍会被填充供 -save 使用。
+	if results[0].Image == "" {
+		t.Fatalf("-save 依赖的标注图应被保留: %.64q", results[0].Image)
 	}
 	if !strings.Contains(out, "\n  ") {
 		t.Fatalf("-pretty 应缩进输出")
+	}
+	// JSON 输出不含图片字段。
+	if r := decodeResults(t, out); r[0].Image != "" {
+		t.Fatalf("JSON 不应含图片字段: %.64q", r[0].Image)
 	}
 	if _, err := os.Stat(filepath.Join(saveDir, "securecv_001.jpg")); err != nil {
 		t.Fatalf("-save 未生成标注图: %v", err)

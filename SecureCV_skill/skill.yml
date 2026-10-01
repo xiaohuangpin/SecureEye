@@ -15,7 +15,6 @@ runtime:
   language: go
   min_version: "1.25.0"
   module: securecv
-  build: cd src && go build -o ../bin/securecv ./cmd/securecv
   binary: bin/securecv
   library_package: securecv
 
@@ -84,9 +83,6 @@ outputs:
   type: array<object>
   description: 与输入顺序一致的结果数组，单图失败时该条目的 error 字段非空
   schema:
-    image:
-      type: string
-      description: 结果图的 data URI（data:image/jpeg;base64,...），no_image 时为空
     label:
       type: string
       description: 拼接后的隐患描述文本，形如 "1.工人未佩戴安全带\n2...."

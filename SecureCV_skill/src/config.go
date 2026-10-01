@@ -1,6 +1,7 @@
 package securecv
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -24,34 +25,62 @@ const (
 
 // Config 为 SecureCV 的运行配置，全部字段均可通过环境变量注入。
 type Config struct {
-	APIKey      string        // 必填，模型服务密钥
-	BaseURL     string        // 必填，模型服务地址（OpenAI 兼容端点）
-	Model       string        // 必填，多模态模型名称
-	FontPath    string        // 可选，中文标注字体，留空则自动探测
-	FontSize    int           // 可选，标注字号
-	MaxSize     int           // 可选，上传图片的最大边长，超出等比缩小
-	Concurrency int           // 可选，批量推理并发度
-	Timeout     time.Duration // 可选，单次模型请求超时
-	HTTPTimeout time.Duration // 可选，下载网络图片的超时
-	Debug       bool          // 可选，输出调试日志（含模型原始输出）
+	APIKey      string        `json:"api_key"`
+	BaseURL     string        `json:"base_url"`
+	Model       string        `json:"model"`
+	FontPath    string        `json:"font_path"`
+	FontSize    int           `json:"font_size"`
+	MaxSize     int           `json:"max_size"`
+	Concurrency int           `json:"concurrency"`
+	Timeout     time.Duration `json:"timeout"`
+	HTTPTimeout time.Duration `json:"http_timeout"`
+	Debug       bool          `json:"debug"`
+	Loaded      bool          // JSON 配置文件是否成功加载；仅内部用于区分来源
 }
 
-// LoadConfig 从环境变量加载配置并做合法性校验。
-// 必填项优先读取小写 api_key / base_url / model，兼容大写与 OPENAI_ 前缀变体。
+// LoadConfig 先从可执行文件所在目录加载 model_config.json，再叠加环境变量。
+// JSON 中已填入的必填项（api_key/base_url/model）优先；其余可选字段以环境变量覆盖
+// JSON 值，并回退到默认值。若 JSON 缺失或为空则视为未配置。
 func LoadConfig() (Config, error) {
-	cfg := Config{
-		APIKey:      lookupEnv("api_key", "API_KEY", "OPENAI_API_KEY"),
-		BaseURL:     lookupEnv("base_url", "BASE_URL", "OPENAI_BASE_URL"),
-		Model:       lookupEnv("model", "MODEL", "OPENAI_MODEL"),
-		FontPath:    envString("SECURECV_FONT_PATH", ""),
+	file := loadFromJSON()
+	return Config{
+		APIKey:      file.APIKey,
+		BaseURL:     file.BaseURL,
+		Model:       file.Model,
+		FontPath:    envString("SECURECV_FONT_PATH", file.FontPath),
 		FontSize:    envInt("SECURECV_FONT_SIZE", DefaultFontSize),
 		MaxSize:     envInt("SECURECV_MAX_SIZE", DefaultMaxSize),
 		Concurrency: envInt("SECURECV_CONCURRENCY", DefaultConcurrency),
-		Timeout:     envDuration("SECURECV_TIMEOUT", DefaultTimeout),
-		HTTPTimeout: envDuration("SECURECV_HTTP_TIMEOUT", DefaultHTTPTimeout),
+		Timeout:     envDuration("SECURECV_TIMEOUT", file.Timeout),
+		HTTPTimeout: envDuration("SECURECV_HTTP_TIMEOUT", file.HTTPTimeout),
 		Debug:       envBool("SECURECV_DEBUG"),
+	}, file.Validate()
+}
+
+// loadFromJSON 从本配置文件所在目录的上一层（即项目根）读取 model_config.json。
+// JSON 缺失、为空或解析失败时返回 Loaded=false 的零值，保证向后兼容。
+func loadFromJSON() Config {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		return Config{Loaded: true}
 	}
-	return cfg, cfg.Validate()
+	// config.go -> src; model_config.json 位于其父目录（项目根）。
+	// runtime.Caller 在 go test 等场景可能返回相对路径，故先归一化为绝对路径。
+	root := filepath.Dir(filepath.Dir(file))
+	if !filepath.IsAbs(root) {
+		if wd, err := os.Getwd(); err == nil {
+			root = filepath.Join(wd, root)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(root, "model_config.json"))
+	if err != nil || len(strings.TrimSpace(string(b))) == 0 {
+		return Config{Loaded: true}
+	}
+	cfg := Config{}
+	if json.Unmarshal(b, &cfg) == nil {
+		cfg.Loaded = true
+	}
+	return cfg
 }
 
 // Validate 校验必填项与取值范围，并补齐字体路径。

@@ -15,7 +15,8 @@ client = MultClient(
     api_key,
     base_url,
     model_name,
-    example)
+    "simhei.ttf"
+)
 
 async def infer_cv(image_input: Union[str, Image.Image]) -> Tuple[Image.Image, str]:
     # 如果用户没有上传图片或输入为空

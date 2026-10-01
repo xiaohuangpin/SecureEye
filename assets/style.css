@@ -160,16 +160,18 @@ body {
 .grid td { padding: 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 
 .thumb {
-    width: 100%;
-    max-height: 110px;
-    object-fit: cover;
+    max-width: 360px;
+    object-fit: contain;
     border-radius: 8px;
     cursor: zoom-in;
     display: block;
-    background: var(--bg);
 }
 
-.desc { line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.desc {
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
 .ok { color: var(--success); }
 .empty { text-align: center; color: var(--muted); padding: 36px 0; }
 

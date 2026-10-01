@@ -57,20 +57,19 @@ SecureCV_skill/
 
 ## 构建
 
+编译产物见 `skill.yml` 的 `binary` 字段；编译命令（含离线/vendor）见下方。这是唯一的权威出处。
+
 ```bash
-cd src
-go build -o ../bin/securecv ./cmd/securecv     # Windows 下产物为 securecv.exe
+cd src && go build -o ../bin/securecv ./cmd/securecv     # Windows 下产物为 securecv.exe
 ```
 
-离线构建（使用 vendor 目录）：
+离线构建（使用 vendor 目录，无需联网）：
 
 ```bash
 cd src && go build -mod=vendor -o ../bin/securecv ./cmd/securecv
 ```
 
 ## 命令行用法
-
-```
 securecv [flags] <image> [image ...]
 ```
 
@@ -82,7 +81,6 @@ securecv [flags] <image> [image ...]
 | `-concurrency` | 批量并发度，覆盖环境变量 | 环境变量值 |
 | `-timeout` | 单次请求超时，覆盖环境变量 | 环境变量值 |
 | `-save <dir>` | 将标注图保存到指定目录 | 不保存 |
-| `-no-image` | 输出不含 base64 图片，仅保留标签与坐标 | `false` |
 | `-pretty` | 格式化输出 JSON | `false` |
 | `-check` | 仅校验模型连通性后退出 | - |
 
@@ -190,4 +188,4 @@ func main() {
 
 **标签没有中文，只画了红框** — 未找到 `simhei.ttf`。设置 `SECURECV_FONT_PATH` 指向字体文件，或把字体放到可执行文件同级的 `assets/` 目录。
 
-**输出 JSON 很大** — 加 `-no-image` 去掉 base64 图片，只保留标签与坐标。
+**输出 JSON 很大** — JSON 仅含 `label` 与 `detections`（不含 base64 图片）；若需标注图，用 `-save <dir>` 落盘。

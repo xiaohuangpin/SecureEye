@@ -7,7 +7,8 @@
 // 环境变量（必填）：api_key / base_url / model
 // 环境变量（可选）：SECURECV_FONT_PATH、SECURECV_FONT_SIZE、SECURECV_MAX_SIZE、
 //
-//	SECURECV_CONCURRENCY、SECURECV_TIMEOUT、SECURECV_HTTP_TIMEOUT、SECURECV_DEBUG
+//		SECURECV_CONCURRENCY、SECURECV_TIMEOUT、SECURECV_HTTP_TIMEOUT、SECURECV_DEBUG
+//	 bin\securecv -save src\cmd\securecv\testdata\out "src\cmd\securecv\testdata\out\159.jpg"
 package main
 
 import (
@@ -30,21 +31,19 @@ func main() {
 	}
 }
 
-
 func run() error {
 	var (
 		label       = flag.Bool("label", true, "是否绘制标注框与标签")
 		concurrency = flag.Int("concurrency", 0, "批量推理并发度，覆盖环境变量")
 		timeout     = flag.Duration("timeout", 0, "单次请求超时，如 90s，覆盖环境变量")
 		saveDir     = flag.String("save", "", "将标注图保存到指定目录")
-		noImage     = flag.Bool("no-image", false, "输出中不包含 base64 图片，仅保留标签与坐标")
 		pretty      = flag.Bool("pretty", false, "格式化输出 JSON")
 		check       = flag.Bool("check", false, "仅校验模型连通性后退出")
 	)
 	flag.Usage = usage
 	flag.Parse()
 
-	cfg, err := securecv.LoadConfig()  // 加载模型配置
+	cfg, err := securecv.LoadConfig()
 	if err != nil {
 		return err
 	}
@@ -54,14 +53,14 @@ func run() error {
 	if *timeout > 0 {
 		cfg.Timeout = *timeout
 	}
-	securecv.SetupLogger(cfg.Debug)  // 初始化日志模块
+	securecv.SetupLogger(cfg.Debug)
 
-	client, err := securecv.NewClient(cfg)  //创建openai客户端
+	client, err := securecv.NewClient(cfg)
 	if err != nil {
 		return err
 	}
 
-	if *check {  
+	if *check {
 		if !client.TestAPI(context.Background()) {
 			return fmt.Errorf("模型连通性检查失败，请检查 api_key 与 base_url")
 		}
@@ -75,14 +74,10 @@ func run() error {
 		return fmt.Errorf("请至少提供一张图片路径")
 	}
 
-	results := client.BatchInferPaths(context.Background(), paths, *label)  //图片安全隐患检测
+	results := client.BatchInferPaths(context.Background(), paths, *label)
+
 	if *saveDir != "" {
 		saveResults(results, *saveDir)
-	}
-	if *noImage {
-		for i := range results {
-			results[i].Image = ""
-		}
 	}
 	return writeJSON(os.Stdout, results, *pretty)
 }
@@ -121,7 +116,7 @@ func usage() {
 	var sb strings.Builder
 	sb.WriteString("securecv - 施工现场安全隐患检测\n\n用法:\n  securecv [flags] <image> [image ...]\n\n")
 	sb.WriteString("示例:\n  set api_key=xxx&& set base_url=https://...&& set model=glm-4v && securecv image/1.jpg\n\n")
-	sb.WriteString("环境变量:\n")
+	sb.WriteString("参数:\n")
 	sb.WriteString("  api_key / base_url / model          必填，模型参数\n")
 	sb.WriteString("  SECURECV_FONT_PATH                  中文字体路径（默认自动探测 simhei.ttf）\n")
 	sb.WriteString("  SECURECV_FONT_SIZE                  标注字号（默认 14）\n")
@@ -130,7 +125,11 @@ func usage() {
 	sb.WriteString("  SECURECV_TIMEOUT                    单次请求超时（默认 120s）\n")
 	sb.WriteString("  SECURECV_HTTP_TIMEOUT               网络图片下载超时（默认 10s）\n")
 	sb.WriteString("  SECURECV_DEBUG                      开启调试日志（1/true/yes/on）\n\n")
-	sb.WriteString("参数:\n")
+	sb.WriteString("  -label        是否绘制标注框与标签（默认开启）\n")
+	sb.WriteString("  -save <dir>    将标注图保存到指定目录\n")
+	sb.WriteString("  -pretty        格式化输出 JSON\n")
+	sb.WriteString("  -check         仅校验模型连通性后退出\n")
+	sb.WriteString("环境变量:\n")
 	fmt.Fprint(os.Stderr, sb.String())
 	flag.PrintDefaults()
 }

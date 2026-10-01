@@ -11,23 +11,24 @@ description: 基于多模态大模型的施工现场安全隐患检测技能，�
 
 ## 前置条件
 
-- Go 1.25 及以上
-- 环境变量 `api_key`、`base_url`、`model` 必须已设置，缺失时程序直接报错退出，不要尝试硬编码密钥
+- 环境变量 `api_key`、`base_url`、`model` 必须已设置；缺失时程序直接报错退出，不要尝试硬编码密钥
+- 可执行文件为 `bin/securecv.exe`（Windows）或 `bin/securecv`（Linux/macOS），由 `skill.yml` 的 `binary` 字段定位；编译步骤见 `readme.md`
 
 ## 执行流程
 
-1. 确认环境变量齐备；不清楚时用 `-check` 参数做一次连通性自检。
-2. 构建命令：`cd src && go build -o ../bin/securecv ./cmd/securecv`（Windows 下产物为 `securecv.exe`）。依赖已 vendor，可用 `go build -mod=vendor` 离线构建。
-3. 运行命令：`securecv [flags] <image> [image ...]`，图片支持本地路径与 http(s) 链接。
-4. 解析 stdout 的 JSON 结果数组；日志在 stderr，不要混用。
-5. 结果中 `detections` 为空表示未发现隐患；某条目 `error` 非空表示该图处理失败，其余图片不受影响。
+1. **先做连通性自检**：`bin\securecv -check`，确认模型可用后再进入检测；不通则提示用户检查 `api_key` / `base_url`。
+2. **运行检测**：`securecv [flags] <image> [image ...]`，图片支持本地路径与 http(s) 链接，可接受单张或多张。
+3. **解析 stdout**：结果是 JSON 数组；日志在 stderr，不要混用。`-pretty` 仅用于人工阅读、程序消费时不加。
+4. **解读结果**：
+   - `detections` 为空 → 该图未发现隐患
+   - 某条目 `error` 非空 → 该图处理失败，其余图片不受影响
 
 ## 参数要点
 
 - `-label=false`：只检测不画框，返回原图
-- `-no-image`：输出不含 base64 图片，体积最小，适合只看结构化结果
-- `-save <dir>`：把标注图写成 JPEG 文件
+- `-save <dir>`：把标注图写成 JPEG 文件（按序号命名）
 - `-pretty`：格式化 JSON，便于人工阅读；程序消费时不加
+- `-concurrency N` / `-timeout D`：覆盖环境变量 `SECURECV_CONCURRENCY`、`SECURECV_TIMEOUT`
 
 ## 坐标约定
 

@@ -22,10 +22,10 @@ const (
 )
 
 var (
-	boxColor  = color.RGBA{R: 255, G: 0, B: 0, A: 255} // 边框红色
-	fillColor = color.RGBA{R: 255, G: 0, B: 0, A: 30}  // 半透明填充
+	boxColor = color.RGBA{R: 255, G: 0, B: 0, A: 255} // 边框红色
+	//fillColor = color.RGBA{R: 255, G: 0, B: 0, A: 30}  // 半透明填充
 	textColor = color.RGBA{R: 255, G: 255, B: 255, A: 255}
-	labelBG   = color.RGBA{R: 255, G: 0, B: 0, A: 200} // 标签底色
+	//labelBG   = color.RGBA{R: 255, G: 0, B: 0, A: 200} // 标签底色
 )
 
 // LoadFace 加载 TrueType 字体，字体缺失或解析失败时返回 nil（标注降级为只画框）。
@@ -74,7 +74,7 @@ func VisualizeBoxes(img image.Image, boxes [][4]int, labels []string, face font.
 		if rect.Empty() {
 			continue
 		}
-		draw.Draw(dst, rect, image.NewUniform(fillColor), image.Point{}, draw.Over)
+		//draw.Draw(dst, rect, image.NewUniform(fillColor), image.Point{}, draw.Over)
 		drawBorder(dst, rect, boxColor, BoxLineWidth)
 
 		var label string
@@ -109,31 +109,43 @@ func drawBorder(dst *image.RGBA, rect image.Rectangle, c color.Color, width int)
 
 // drawLabel 在边框上方绘制带底色的标签，越界时回退到边框内部顶端。
 func drawLabel(dst *image.RGBA, rect image.Rectangle, label string, face font.Face) {
+
 	drawer := &font.Drawer{Face: face}
+
 	advance := drawer.MeasureString(label).Ceil()
+
 	metrics := face.Metrics()
+
 	ascent := metrics.Ascent.Ceil()
+
 	textH := ascent + metrics.Descent.Ceil()
 
 	bounds := dst.Bounds()
+
 	width := advance + Padding*2
+
 	if width > bounds.Dx() {
 		width = bounds.Dx()
 	}
 
 	x := clampInt(rect.Min.X, 0, bounds.Dx()-width)
+
 	y := rect.Min.Y - textH - LabelGap
+
 	if y < 0 {
 		y = clampInt(rect.Min.Y, 0, bounds.Dy()-textH)
 	}
 
-	bg := image.Rect(x, y, x+width, y+textH).Intersect(bounds)
-	if !bg.Empty() {
-		draw.Draw(dst, bg, image.NewUniform(labelBG), image.Point{}, draw.Over)
-	}
+	/*
+		bg := image.Rect(x, y, x+width, y+textH).Intersect(bounds)
+		if !bg.Empty() {
+			draw.Draw(dst, bg, image.NewUniform(labelBG), image.Point{}, draw.Over)
+		}
+	*/
 
 	drawer.Dst = dst
 	drawer.Src = image.NewUniform(textColor)
+
 	drawer.Dot = fixed.P(x+Padding, y+ascent)
 	drawer.DrawString(label)
 }

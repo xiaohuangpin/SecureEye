@@ -49,6 +49,9 @@ func NewClient(cfg Config) (*Client, error) {
 	return c, nil
 }
 
+// Config 返回当前客户端配置副本。
+func (c *Client) Config() Config { return c.cfg }
+
 // TestAPI 校验密钥与地址连通性。
 func (c *Client) TestAPI(ctx context.Context) bool {
 	if _, err := c.client.Models.List(ctx); err != nil {

@@ -1,6 +1,5 @@
 {
-    "api_key": "sk-live-eIr7oqKzOGTAqc_kwiDy5cWVZdgae51o_m2xdOVGcyc",
-    "base_url": "https://api.modelbest.cn/v1",
-    "model": "MiniCPM-V-4.5",
-    "is_label": true
+    "api_key" :"ms-8dada6b5-43a0-40ae-adeb-b29649d4d926",
+    "base_url" : "https://api-inference.modelscope.cn/v1",
+    "model" : "Qwen/Qwen3.5-122B-A10B"
 }

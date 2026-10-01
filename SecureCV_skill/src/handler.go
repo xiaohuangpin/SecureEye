@@ -11,10 +11,11 @@ import (
 
 // InferResult 为单张图片的推理结果，同时作为 CLI 的 JSON 输出单元。
 type InferResult struct {
-	Image      string          `json:"image"`           // data URI，与 app_main.py 的约定一致
 	Label      string          `json:"label"`           // "1.描述\n2.描述"
 	Detections []DetectionItem `json:"detections"`      // 归一化坐标的检测条目
 	Error      string          `json:"error,omitempty"` // 单图错误信息，不影响整批
+	// Image 为标注图的 data URI；仅用于 -save 写入磁盘，不进入 JSON 输出。
+	Image string `json:"-"`
 }
 
 // Infer 对单张图片执行检测，isLabel 为 true 时返回带标注的图片。

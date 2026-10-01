@@ -309,7 +309,7 @@ def main() -> None:
     )
     api.set_window(window)
     logger.info("应用启动")
-    webview.start(debug=True)
+    webview.start() #debug=True
     logger.info("应用退出")
 
 
