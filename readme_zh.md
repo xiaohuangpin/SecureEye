@@ -4,6 +4,16 @@
 
 ---
 
+## 🎉 本次更新亮点
+
+这一版我们把 SecureEye 从「一个桌面小工具」升级为「一套可复用、可扩展的安全巡检能力」，三处关键变化：
+
+1. **🧩 检测能力封装为 Skill（SecureCV）**：用 Go 重写了核心检测逻辑，编译成单文件 `securecv.exe`，并以标准 `SKILL.md` / `skill.yml` 描述其输入输出。它不再只是一个 GUI 按钮，而是一个能被任意智能体「一键调用」的技能——丢进图片，返回边界框坐标 + 中文隐患描述 + 带红框标注的结果图。
+2. **🖥️ 桌面框架由 pywebview 迁移到 PySide6**：pywebview 对异步（asyncio）兼容较差、且存在若干隐藏 Bug；我们改用生态健全、原生异步、更稳定的 **PySide6 + QFluentWidgets + qasync**，界面更流畅、崩溃更少、跨版本更可靠。
+3. **✍️ 新增「系统提示词」自定义模块**：内置提示词聚焦「人的不安全行为」，但现在你可以像写代码一样，在专门的编辑页里**自定义角色设定与识别重点**，让模型去检测你关心的隐患（如动火作业未设监护人、有限空间未通风等），固定 JSON 输出模板由程序自动追加，保证结果始终可解析。
+
+---
+
 ## ✨ 它解决什么问题？
 
 在工地上，真正酿成事故的大多是**人的不安全行为**：
@@ -36,7 +46,78 @@
 
 ![](./image/app_example.png)
 
-> 💡 **SecureEye 的设计原则**：用 `pywebview` 构建一个轻量、稳定的桌面应用，通过 OpenAI 兼容接口对接模型服务。**不依赖 OpenCV、PyTorch 这类重型第三方库**，降低安装负担与运行不稳定性，开箱即用。
+> 💡 **SecureEye 的设计原则**：用 **PySide6 + QFluentWidgets** 构建一个轻量、原生异步、稳定的桌面应用，通过 OpenAI 兼容接口对接模型服务。**不依赖 OpenCV、PyTorch 这类重型第三方库**，降低安装负担与运行不稳定性，开箱即用。
+
+---
+
+## 🧩 新亮点一：把检测能力封装成 Skill —— SecureCV
+
+过去「隐患检测」只能在这个桌面应用里点按钮。现在，我们用 **Go 重写**了核心检测逻辑，编译为单文件可执行程序 `SecureCV_skill/bin/securecv.exe`，并用标准的 `SKILL.md` + `skill.yml` 描述它的输入/输出契约——它就变成了一个**可被任意智能体（Agent）一键调用的「技能」**。
+
+- **纯 Go 实现，离线可构建**：依赖已 `go mod vendor` 落地，无 Python 运行时负担，一个 exe 走天下；
+- **标准化输入输出**：输入单张/多张工地图片（本地路径或 http(s) 链接），stdout 返回结构化 JSON（`bbox_2d` 归一化坐标 + 中文 `label`），日志走 stderr，不污染结果；
+- **内置专业提示词与降级链**：优先 `json_schema` 严格输出，服务端不支持时自动降级 `json_object`，解析失败再走正则兜底；
+- **批量并发 + 单图容错**：批量推理限流并发，某张图失败只写入该条目 `error`，不中断整批。
+
+**原图 → 技能结果图**（自动画出红框并标注中文隐患描述）：
+
+| 原图 | Skill 标注结果 |
+| --- | --- |
+| ![](./image/skill_source.jpg) | ![](./image/skill_result.jpg) |
+
+命令行一键调用（PowerShell）：
+
+```powershell
+$env:api_key="sk-xxxx"
+$env:base_url="https://open.bigmodel.cn/api/paas/v4/"
+$env:model="glm-4.6v-flash"
+
+.\SecureCV_skill\bin\securecv.exe -check                      # 先做连通性自检
+.\SecureCV_skill\bin\securecv.exe -pretty image\159.jpg        # 单图检测，JSON 输出到 stdout
+.\SecureCV_skill\bin\securecv.exe -save out image\5.jpg image\6.jpg  # 批量检测并保存标注图
+```
+
+输出示例：
+
+```json
+[
+  {
+    "label": "1.工人临边作业未正确佩戴或挂扣安全带",
+    "detections": [
+      { "bbox_2d": [120, 85, 340, 290], "label": "工人临边作业未正确佩戴或挂扣安全带" }
+    ]
+  }
+]
+```
+
+> 📌 `bbox_2d` 为 `[0,1000]` 归一化坐标，转像素需除以 1000 再乘图片宽高。详细参数与库调用方式见 [`SecureCV_skill/readme.md`](./SecureCV_skill/readme.md)、[`SecureCV_skill/SKILL.md`](./SecureCV_skill/SKILL.md) 与 [`SecureCV_skill/skill.yml`](./SecureCV_skill/skill.yml)。
+
+---
+
+## ✍️ 新亮点二：自定义「系统提示词」模块
+
+不同工地、不同巡检任务关心的隐患并不一样。新版桌面应用新增了独立的**「系统提示词」页面**（采用 VSCode 风格纯文本编辑器，带行号、当前行高亮、自动缩进）：
+
+- **只改「可编辑段」**：你可以自由编写**角色设定**与**重点识别行为**，例如把检测重点从「高处作业」切换到「动火作业 / 有限空间 / 临边防护」；
+- **输出模板由程序固定追加**：无论你怎么改写提示词，结构化的 JSON 输出模板都会由核心自动拼接，保证模型输出始终可解析、可画框；
+- **一键恢复默认**：随时点「恢复默认」回到内置的专业安全巡查提示词；`Ctrl+S` 保存、`Ctrl+Shift+D` 恢复，改动持久化到本地数据库。
+
+> 💡 提示词写得越聚焦，模型检得越准。比如加入「重点检查动火作业前是否清理周边可燃物、是否配备灭火器与专人监护」，即可让模型针对动火场景专项排查。
+
+---
+
+## 🖥️ 新亮点三：桌面框架迁移 PySide6
+
+我们从 `pywebview` 整体迁移到了 **PySide6 + QFluentWidgets + qasync** 技术栈：
+
+| 对比项 | pywebview（旧） | PySide6（新） |
+| --- | --- | --- |
+| 异步兼容 | 与 asyncio 协作较差，回调链路易卡 | `qasync` 将 Qt 事件循环与 asyncio 统一，天然异步 |
+| 稳定性 | 存在若干隐藏 Bug（白屏/僵死/关闭残留） | 生态成熟、版本迭代稳定 |
+| 界面能力 | 依赖前端 HTML/CSS 拼接 | Fluent 风格原生控件，导航/表格/编辑页统一 |
+| 数据与权限 | 无本地账号体系 | 内置 SQLite + scrypt 口令派生的本地账号/登录 |
+
+> 一句话：同样的检测能力，跑在一个更流畅、更稳定、可长期维护的桌面壳子里。
 
 ---
 
@@ -69,12 +150,24 @@
 
 ## 💻 本地源码部署
 
+桌面端（PySide6）：
+
 ```bash
 python3 -m pip install --upgrade pip
-pip install openai pillow python-docx pywebview
+pip install openai pillow python-docx pyside6 pyside6-fluent-widgets qasync python-dotenv
 git clone https://github.com/xiaohuangpin/SecureEye
-python3 main.py
+cd SecureEye
+python main_GUI.py
 ```
+
+SecureCV Skill（Go，可选）：
+
+```bash
+cd SecureCV_skill/src
+ go build -mod=vendor -o ../bin/securecv ./cmd/securecv   # Windows 产物为 securecv.exe
+```
+
+> 项目推荐使用 `uv` 管理依赖，直接 `uv sync` 后 `uv run python main_GUI.py` 即可启动。
 
 ---
 
@@ -100,7 +193,9 @@ python3 main.py
 
 ## 🖥️ 支持平台
 
-目前支持 **Windows** 系统，且需要系统中自带 **Edge 浏览器组件**（pywebview 运行依赖）。
+- **桌面应用**：基于 PySide6，支持 **Windows**（ Linux / macOS 兼容 Qt 阵营，可自行验证）；相比旧版不再依赖 Edge WebView2 运行环境；
+- **SecureCV Skill**：单文件 `securecv` 可执行程序，Windows / Linux / macOS 均可编译运行；
+- **Gradio 在线版**：仅需浏览器，跨平台。
 
 ---
 
@@ -122,10 +217,10 @@ python3 main.py
 
 ## 🗺️ 未来改进计划
 
-- [ ] **开发对应的 Skill（技能插件）**：将 SecureEye 的"工地不安全行为检测 + 整改单生成"能力封装为可复用的 Skill，使其能无缝接入支持技能扩展的 AI 编程/智能体平台。目标包括：
-  - 标准化输入/输出协议，让其他智能体一键调用本检测能力；
-  - 内置专业安全巡查提示词与违规类型清单，开箱即用；
-  - 支持在智能体工作流中自动触发检测并生成整改建议。
+- [x] **开发对应的 Skill（技能插件）**：已将“工地不安全行为检测 + 结果标注”能力用 Go 封装为可复用的 SecureCV Skill，支持智能体一键调用（已完成）；
+- [x] **提示词自定义**：已支持在“系统提示词”页面自定义检测重点（已完成）；
+- [ ] 持续扩充违规类型清单与场景化提示词模板库；
+- [ ] 在智能体工作流中自动触发检测并直接生成整改建议。
 
 ---
 

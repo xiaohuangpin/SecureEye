@@ -1,4 +1,5 @@
 import base64,io,logging,json,asyncio,re
+from functools import lru_cache
 from typing import List
 from PIL import Image, ImageDraw, ImageFont
 from openai import AsyncOpenAI
@@ -9,78 +10,72 @@ from core.utils import _download_image,_repair_bbox_commas,_reverse_normalize_bo
 logger = logging.getLogger(__name__)
 
 class MultClient:
+    MAX_SIZE = 2048        # 输入图像最长边限制
+    JPEG_QUALITY = 85      # 全局 JPEG 质量（发模型 / 展示 / 导出共用）：相比 95 体积约减 1/3
+    MIN_FONT_SIZE = 8      # 标注字体大小可调范围（模型配置页）
+    MAX_FONT_SIZE = 72
+    DEFAULT_FONT_SIZE = 14
+
+    # 固定段：结构化解析（DetectionResponse）依赖此输出模板，界面只读展示、用户不可修改
+    JSON_TEMPLATE: str = """**输出要求**
+1. 每个不安全行为单独输出一条检测项，放入 detections 数组。
+2. 边界框 bbox_2d 为 [x1, y1, x2, y2]，整数像素坐标，且必须恰好 4 个数值。
+3. 边界框应紧密包围涉事工人及其危险动作范围。
+4. label 简明描述工人的具体不安全行为。
+5. 只标注明确可见、可判断的违章行为；不确定、模糊、遮挡严重导致无法判断的情况不要输出。
+6. 如果没有发现工人不安全行为，detections 返回空数组。
+7. 直接返回结构化对象，不要输出任何解释、Markdown 或额外文字。
+
+**JSON格式**
+{
+    "detections": [
+        {
+            "bbox_2d": [x1, y1, x2, y2],
+            "label": "工人临边作业未正确佩戴或挂扣安全绳"
+        }
+    ]
+}"""
+
+    # 可编辑段默认值：角色与识别重点，用户可在“系统提示词”页面修改
+    DEFAULT_PROMPT_BODY: str = """**角色**
+你是一名专业的施工现场安全巡查员，负责识别图像中工人的不安全行为和违章作业行为。
+
+请只关注“工人自身的不安全行为”，不要重点检查设备、材料、环境或管理问题。只有当某个物体或环境与工人的危险行为直接相关时，才可以一并纳入边界框。
+
+**重点识别行为**
+- 高处作业、临边作业、洞口作业未佩戴安全带或未正确挂扣安全绳。
+- 高处作业安全绳未高挂低用，或安全带悬挂方式明显错误。
+- 工人站在脚手架、平台、梯子、设备边缘、护栏、临边位置进行冒险作业。
+- 工人攀爬、跨越、倚靠、坐卧在护栏、脚手架杆件、洞口边缘或不稳定位置。
+- 工人在升降平台、剪叉车、曲臂车等设备上探身、跨越、站立在护栏上或超出安全作业范围。
+- 工人未戴安全帽，或未正确系紧安全帽下颚带。
+- 工人在施工区域未穿反光背心或未佩戴明显必要个人防护用品。
+- 其他明显违反安全操作规程的工人行为。"""
+
     def __init__(
         self,
         api_key: str,
         base_url: str,
         model_name: str,
+        prompt: str | None = None,
         font_path: str = "simhei.ttf",
-        font_size: int = 14
+        font_size: int = DEFAULT_FONT_SIZE
     ):
         self.client:AsyncOpenAI = AsyncOpenAI(api_key=api_key, base_url=base_url)
         self.model:str = model_name
-        self.font:ImageFont = self._load_font(font_path, font_size)
-        self.MAX_SIZE = 2048
-        self.system_prompt:str = f"""
-        **角色**
-        你是一名专业的施工现场安全巡查员，负责识别图像中工人的不安全行为和违章作业行为。
+        self.font_size:int = self.clamp_font_size(font_size)
+        self.font:ImageFont = self._load_font(font_path, self.font_size)
+        # 唯一提示词 = 用户可编辑段 + 固定 JSON 输出模板（两种调用方式共用）
+        self.prompt_body: str = (prompt or self.DEFAULT_PROMPT_BODY).strip()
+        self.system_prompt:str = f"{self.prompt_body}\n\n{self.JSON_TEMPLATE}"
 
-        请只关注“工人自身的不安全行为”，不要重点检查设备、材料、环境或管理问题。只有当某个物体或环境与工人的危险行为直接相关时，才可以一并纳入边界框
-
-        **重点识别行为**
-        - 高处作业、临边作业、洞口作业未佩戴安全带或未正确挂扣安全绳。
-        - 高处作业安全绳未高挂低用，或安全绳悬挂方式明显错误。
-        - 工人站在脚手架、平台、梯子、设备边缘、护栏、临边位置进行冒险作业。
-        - 工人攀爬、跨越、倚靠、坐卧在护栏、脚手架杆件、洞口边缘或不稳定位置。
-        - 工人在升降平台、剪叉车、曲臂车等设备上探身、跨越、站立在护栏上或超出安全作业范围。
-        - 工人未戴安全帽，或未正确系紧安全帽下颚带。
-        - 工人在施工区域未穿反光背心或未佩戴明显必要个人防护用品。
-        - 其他明显违反安全操作规程的工人行为。
-
-        **输出要求**
-        1. 每个不安全行为单独输出一条 JSON 对象。
-        2. 边界框格式为 bbox_2d: [x1, y1, x2, y2]，使用整数像素坐标。
-        3. 边界框应紧密包围涉事工人及其危险动作范围。
-        4. label简明描述工人的具体不安全行为。
-        5. 只标注明确可见、可判断的违章行为；不确定、模糊、遮挡严重导致无法判断的情况不要输出。
-        6. 只输出 JSON 数组，不要输出任何解释、Markdown 或额外文字。
-        7. 如果没有发现工人不安全行为，输出[]。
-
-        **JSON格式**
-        [
-            {{
-                "bbox_2d": [x1, y1, x2, y2],
-                "label": "工人临边作业未正确佩戴或挂扣安全绳"
-            }}
-            ...
-        ]
-    """
-
-        self.parse_prompt: str = f"""
-        **角色**
-        你是一名专业的施工现场安全巡查员，负责识别图像中工人的不安全行为和违章作业行为。
-
-        请只关注“工人自身的不安全行为”，不要重点检查设备、材料、环境或管理问题。只有当某个物体或环境与工人的危险行为直接相关时，才可以一并纳入边界框。
-
-        **重点识别行为**
-        - 高处作业、临边作业、洞口作业未佩戴安全带或未正确挂扣安全绳。
-        - 高处作业安全绳未高挂低用，或安全带悬挂方式明显错误。
-        - 工人站在脚手架、平台、梯子、设备边缘、护栏、临边位置进行冒险作业。
-        - 工人攀爬、跨越、倚靠、坐卧在护栏、脚手架杆件、洞口边缘或不稳定位置。
-        - 工人在升降平台、剪叉车、曲臂车等设备上探身、跨越、站立在护栏上或超出安全作业范围。
-        - 工人未戴安全帽，或未正确系紧安全帽下颚带。
-        - 工人在施工区域未穿反光背心或未佩戴明显必要个人防护用品。
-        - 其他明显违反安全操作规程的工人行为。
-
-        **输出要求**
-        1. 每个不安全行为单独输出一条检测项，放入 detections 数组。
-        2. 边界框 bbox_2d 为 [x1, y1, x2, y2]，整数像素坐标，且必须恰好 4 个数值。
-        3. 边界框应紧密包围涉事工人及其危险动作范围。
-        4. label 简明描述工人的具体不安全行为。
-        5. 只标注明确可见、可判断的违章行为；不确定、模糊、遮挡严重导致无法判断的情况不要输出。
-        6. 如果没有发现工人不安全行为，detections 返回空数组。
-        7. 直接返回结构化对象，不要输出任何解释、Markdown 或额外文字。
-    """
+    @classmethod
+    def clamp_font_size(cls, size: int | str | None) -> int:
+        """字体大小限幅，兼容配置中缺失/非法值"""
+        try:
+            return max(cls.MIN_FONT_SIZE, min(cls.MAX_FONT_SIZE, int(size)))
+        except (TypeError, ValueError):
+            return cls.DEFAULT_FONT_SIZE
         
     async def test_api(self) -> bool:
         try:
@@ -91,8 +86,8 @@ class MultClient:
     
 
     @staticmethod
+    @lru_cache(maxsize=16)  # 缓存字号 TTF：重建客户端（改提示词/字体）时不重复解析大字体文件
     def _load_font(font_path: str, font_size: int) -> ImageFont.FreeTypeFont:
-
         try:
             return ImageFont.truetype(font_path, font_size)
         except Exception as e:
@@ -101,36 +96,43 @@ class MultClient:
 
 
     async def _encode_image_data(self, image_data: str | Image.Image) -> str:
-        is_url:bool = isinstance(image_data, str) and image_data.startswith(("http://", "https://"))
+        """图像 → JPEG base64；解码/缩放/编码等 CPU 活均放工作线程，不占用事件循环"""
+        if isinstance(image_data, Image.Image):
+            return await asyncio.to_thread(self._encode_sync, image_data)
         if isinstance(image_data, str):
-            if is_url:
-                img = Image.open(io.BytesIO(await _download_image(image_data)))
-            else:
-                img = Image.open(image_data)
-            w, h = img.size
-            # 快速路径：无需缩放时直接读取原始文件（保留原格式，性能最优）
-            if w <= 2048 and h <= 2048 and not is_url:
-                img.close()
-                with open(image_data, "rb") as f:
-                    return base64.b64encode(f.read()).decode("utf-8")
-        elif isinstance(image_data, Image.Image):
-            img = image_data
-            w, h = img.size
-        else:
-            raise TypeError("image_data 必须是图像路径 (str) 或 PIL Image 对象")
+            if image_data.startswith(("http://", "https://")):
+                raw = await _download_image(image_data)
+                return await asyncio.to_thread(self._encode_sync, Image.open(io.BytesIO(raw)))
+            return await asyncio.to_thread(self._encode_file, image_data)
+        raise TypeError("image_data 必须是图像路径 (str) 或 PIL Image 对象")
 
-        # 等比缩放：取宽高方向上更严格的缩放比例
-        if w > 2048 or h > 2048:
-            scale = min(2048 / w, 2048 / h)
+    def _encode_file(self, path: str) -> str:
+        """本地文件：无需缩放时直接透传原始字节（保留原格式，性能最优）"""
+        with Image.open(path) as img:
+            if max(img.size) > self.MAX_SIZE:
+                return self._encode_sync(img)
+        with open(path, "rb") as f:
+            return base64.b64encode(f.read()).decode("utf-8")
+
+    def _encode_sync(self, img: Image.Image) -> str:
+        """等比缩放（取宽高方向上更严格的比例）后编 JPEG"""
+        limit: int = self.MAX_SIZE
+        w, h = img.size
+        if w > limit or h > limit:
+            scale = min(limit / w, limit / h)
             img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
-
         buffered = io.BytesIO()
-        img.convert("RGB").save(buffered, format="JPEG", quality=95)
+        img.convert("RGB").save(buffered, format="JPEG", quality=self.JPEG_QUALITY)
         return base64.b64encode(buffered.getvalue()).decode("utf-8")
 
-    async def secure_check(self, image_data: str | Image.Image) -> list[dict]:
+    @staticmethod
+    def _open_rgb(path: str) -> Image.Image:
+        """在线程里完成解码（convert 才真正读入像素）"""
+        with Image.open(path) as img:
+            return img.convert("RGB")
+
+    async def secure_check(self, image_base64: str) -> list[dict]:
         try:
-            image_base64 = await self._encode_image_data(image_data)
             response = await self.client.chat.completions.create(
                 model = self.model,
                 messages = [
@@ -157,13 +159,12 @@ class MultClient:
             logger.error(f"模型推理失败: {e}")
             raise
 
-    async def secure_check_parse(self, image_data: str | Image.Image) -> list[dict]:
+    async def secure_check_parse(self, image_base64: str) -> list[dict]:
         try:
-            image_base64 = await self._encode_image_data(image_data)
             response = await self.client.beta.chat.completions.parse(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": self.parse_prompt},
+                    {"role": "system", "content": self.system_prompt},
                     {
                         "role": "user",
                         "content": [
@@ -313,24 +314,31 @@ class MultClient:
         
         if return_b64:
             buffered = io.BytesIO()
-            img.save(buffered, format="JPEG", quality=95)
+            img.save(buffered, format="JPEG", quality=self.JPEG_QUALITY)
             return base64.b64encode(buffered.getvalue()).decode('utf-8')
         return img
     
-    async def _detect(self, image: Image.Image) -> list[dict]:
-        """优先用结构化解析，失败自动降级到通用 JSON 解析"""
+    async def _detect(self, image_data: str | Image.Image) -> tuple[list[dict], str]:
+        """只编码一次并复用；优先结构化解析，失败自动降级到通用 JSON 解析"""
+        image_base64 = await self._encode_image_data(image_data)
         try:
-            return await self.secure_check_parse(image)
+            return await self.secure_check_parse(image_base64), image_base64
         except Exception as e:
             logger.warning(f"secure_check_parse 失败，降级 secure_check: {e}")
-            return await self.secure_check(image)
+            return await self.secure_check(image_base64), image_base64
 
-    async def infer(self, image_path: str | Image.Image, is_label: bool) -> dict[str, Image.Image | str]:
-        image = Image.open(image_path).convert("RGB") if isinstance(image_path, str) else image_path.convert("RGB")
-        results = await self._detect(image)
+    async def infer(self, image_data: str | Image.Image, is_label: bool) -> dict[str, Image.Image | str]:
+        """检测→（可选）画框；仅标注模式才解码原图，否则直接用原文件字节"""
+        results, image_base64 = await self._detect(image_data)
         boxes, labels = [r["bbox_2d"] for r in results], [r["label"] for r in results]
 
-        output_image = self.visualize_boxes(image, boxes, labels, renormalize=True) if is_label else await self._encode_image_data(image)
+        if is_label:
+            image = (await asyncio.to_thread(self._open_rgb, image_data)
+                     if isinstance(image_data, str) else image_data)
+            output_image = await asyncio.to_thread(self.visualize_boxes, image, boxes, labels)
+        else:
+            output_image = image_base64  # 复用发给模型的编码，不再二次编码
+
         label_text = "\n".join(f"{i}.{lbl}" for i, lbl in enumerate(labels, start=1))
 
         return {"image": output_image, "label": label_text}

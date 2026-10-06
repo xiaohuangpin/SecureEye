@@ -1,3 +1,18 @@
 test_export.py
 test_vidio.mp4
 test_vio.py
+
+# 本地加密数据库（含账号与密文配置，切勿提交）
+*.db
+*.db-wal
+*.db-shm
+
+# 临时自检产物（脚本/截图/临时库）
+test/_tmp_*
+test/_shot_*
+
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/

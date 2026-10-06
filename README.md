@@ -6,6 +6,16 @@
 
 ---
 
+## 🎉 What's New
+
+This release upgrades SecureEye from "a small desktop tool" into "a reusable, extensible safety-inspection capability". Three key changes:
+
+1. **🧩 Detection packaged as a Skill (SecureCV)**: We rewrote the core detection logic in **Go** and compiled it into a single-file `securecv.exe`, described by a standard `SKILL.md` / `skill.yml`. It is no longer just a GUI button — it's a **skill any agent can invoke with one call**: feed in images, get back bounding-box coordinates + Chinese hazard descriptions + a red-box annotated result image.
+2. **🖥️ GUI migrated from pywebview to PySide6**: pywebview had poor async (asyncio) compatibility and several hidden bugs. We moved to **PySide6 + QFluentWidgets + qasync** — a mature ecosystem, native async, and far more stable: smoother UI, fewer crashes, better cross-version reliability.
+3. **✍️ New custom "System Prompt" module**: The built-in prompt focuses on "unsafe human behavior", but now you can **customize the role and detection focus** in a dedicated editor page, pointing the model at the hazards you care about (e.g., hot work without a fire watch, confined space without ventilation). The fixed JSON output template is appended automatically, so results always stay parseable.
+
+---
+
 ## ✨ The Problem We Solve
 
 On construction sites, most serious accidents are caused by **unsafe human behavior**:
@@ -38,7 +48,78 @@ A multimodal large language model combines "image perception + semantic understa
 
 ![](./image/app_example.png)
 
-> 💡 **SecureEye's design principle**: Build a lightweight, stable desktop app with `pywebview`, and connect to model services through an OpenAI-compatible interface. **No heavyweight third-party libraries such as OpenCV or PyTorch**, reducing installation burden and runtime instability for out-of-the-box use.
+> 💡 **SecureEye's design principle**: Build a lightweight, native-async, stable desktop app with **PySide6 + QFluentWidgets**, and connect to model services through an OpenAI-compatible interface. **No heavyweight third-party libraries such as OpenCV or PyTorch**, reducing installation burden and runtime instability for out-of-the-box use.
+
+---
+
+## 🧩 Highlight 1: Detection packaged as a Skill — SecureCV
+
+Previously, "hazard detection" was only a button inside this desktop app. Now we have **rewritten the core detection logic in Go**, compiled it into a single-file executable `SecureCV_skill/bin/securecv.exe`, and described its input/output contract with a standard `SKILL.md` + `skill.yml` — turning it into a **skill any agent can invoke with one call**.
+
+- **Pure Go, offline-buildable**: dependencies are vendored via `go mod vendor`; no Python runtime burden — one exe goes anywhere;
+- **Standardized I/O**: input one/many site images (local paths or http(s) links); stdout returns structured JSON (normalized `bbox_2d` + Chinese `label`), logs go to stderr and never pollute the result;
+- **Built-in professional prompt & graceful fallback**: prefers strict `json_schema`, silently degrades to `json_object` when unsupported, then falls back to regex parsing;
+- **Batch concurrency + per-image fault tolerance**: rate-limited parallel inference; a failed image only writes its own `error` field without aborting the batch.
+
+**Original image → Skill result** (auto-drawn red boxes with Chinese hazard labels):
+
+| Original | Skill annotated result |
+| --- | --- |
+| ![](./image/skill_source.jpg) | ![](./image/skill_result.jpg) |
+
+One-line invocation from the command line (PowerShell):
+
+```powershell
+$env:api_key="sk-xxxx"
+$env:base_url="https://open.bigmodel.cn/api/paas/v4/"
+$env:model="glm-4.6v-flash"
+
+.\SecureCV_skill\bin\securecv.exe -check                       # connectivity self-test first
+.\SecureCV_skill\bin\securecv.exe -pretty image\159.jpg         # single image, JSON to stdout
+.\SecureCV_skill\bin\securecv.exe -save out image\5.jpg image\6.jpg  # batch + save annotated images
+```
+
+Example output:
+
+```json
+[
+  {
+    "label": "1. Worker at the edge not correctly wearing or hooking a safety harness",
+    "detections": [
+      { "bbox_2d": [120, 85, 340, 290], "label": "Worker at the edge not correctly wearing or hooking a safety harness" }
+    ]
+  }
+]
+```
+
+> 📌 `bbox_2d` uses `[0,1000]` normalized coordinates — convert to pixels by dividing by 1000 and multiplying by image width/height. Full parameters and library usage are in [`SecureCV_skill/readme.md`](./SecureCV_skill/readme.md), [`SecureCV_skill/SKILL.md`](./SecureCV_skill/SKILL.md) and [`SecureCV_skill/skill.yml`](./SecureCV_skill/skill.yml).
+
+---
+
+## ✍️ Highlight 2: Custom "System Prompt" module
+
+Different sites and inspection tasks care about different hazards. The new desktop app adds a standalone **"System Prompt" page** (a VSCode-style plain-text editor with line numbers, current-line highlight and auto-indent):
+
+- **Edit only the "editable section"**: freely write the **role** and **focus behaviors**, e.g. switch the detection focus from "work at height" to "hot work / confined space / edge protection";
+- **Output template is fixed and appended by the program**: no matter how you rewrite the prompt, the structured JSON output template is appended by the core, guaranteeing parseable, boxable results;
+- **One-click reset**: return to the built-in professional prompt anytime; `Ctrl+S` to save, `Ctrl+Shift+D` to reset, changes persist to the local database.
+
+> 💡 The more focused your prompt, the more precisely the model detects. For example, add "check whether combustibles are cleared and a fire watch is assigned before hot work" to run a hot-work-specific inspection.
+
+---
+
+## 🖥️ Highlight 3: GUI migrated to PySide6
+
+We fully migrated from `pywebview` to the **PySide6 + QFluentWidgets + qasync** stack:
+
+| Aspect | pywebview (old) | PySide6 (new) |
+| --- | --- | --- |
+| Async compatibility | Poor asyncio interop, callback chains easily stall | `qasync` unifies the Qt event loop with asyncio — native async |
+| Stability | Several hidden bugs (blank screen / freeze / lingering on close) | Mature ecosystem, stable version iteration |
+| UI capability | Relies on stitching front-end HTML/CSS | Native Fluent-style widgets; unified navigation/table/editor |
+| Data & access | No local account system | Built-in SQLite + scrypt-derived local account/login |
+
+> In short: the same detection capability, now running in a smoother, more stable, long-term-maintainable desktop shell.
 
 ---
 
@@ -71,12 +152,24 @@ Click the **Safety Hazard Detection** button and select an image (multiple selec
 
 ## 💻 Build from Source (Local Deployment)
 
+Desktop app (PySide6):
+
 ```bash
 python3 -m pip install --upgrade pip
-pip install openai pillow python-docx pywebview
+pip install openai pillow python-docx pyside6 pyside6-fluent-widgets qasync python-dotenv
 git clone https://github.com/xiaohuangpin/SecureEye
-python3 main.py
+cd SecureEye
+python main_GUI.py
 ```
+
+SecureCV Skill (Go, optional):
+
+```bash
+cd SecureCV_skill/src
+go build -mod=vendor -o ../bin/securecv ./cmd/securecv   # Windows produces securecv.exe
+```
+
+> The project recommends `uv` for dependency management: run `uv sync`, then `uv run python main_GUI.py` to launch.
 
 ---
 
@@ -101,7 +194,9 @@ After running, the browser opens the demo page automatically. Upload or load a s
 
 ## 🖥️ Supported Platforms
 
-Currently supports **Windows** and requires the **Edge browser component** (a runtime dependency of pywebview) to be present in the system.
+- **Desktop app**: built on PySide6, supports **Windows** (Linux / macOS follow the Qt ecosystem and can be verified independently); unlike the old version, it **no longer depends on the Edge WebView2 runtime**;
+- **SecureCV Skill**: a single-file `securecv` executable, compilable and runnable on Windows / Linux / macOS;
+- **Gradio online demo**: browser only, cross-platform.
 
 ---
 
@@ -123,10 +218,10 @@ We use specially optimized prompts to focus the model on **workers' own behavior
 
 ## 🗺️ Future Roadmap
 
-- [ ] **Develop a corresponding Skill (plugin)**: Package SecureEye's "construction unsafe-behavior detection + rectification report generation" capability into a reusable Skill that integrates seamlessly with skill-extensible AI coding/agent platforms. Goals include:
-  - Standardized input/output protocol so other agents can invoke the detection with one click;
-  - Built-in professional safety-inspection prompts and violation-type lists, ready to use;
-  - Automatic detection triggering and rectification-suggestion generation within agent workflows.
+- [x] **Develop a corresponding Skill (plugin)**: the "construction unsafe-behavior detection + result annotation" capability is now packaged in Go as the reusable SecureCV Skill, invocable by any agent with one call (done);
+- [x] **Custom prompts**: the "System Prompt" page now lets you customize the detection focus (done);
+- [ ] Continuously expand the violation-type catalog and a scenario-based prompt template library;
+- [ ] Auto-trigger detection and directly generate rectification suggestions within agent workflows.
 
 ---
 
